@@ -1,0 +1,256 @@
+import math
+import emoji
+from aiogram.utils.emoji import emojize
+from IMP.BASIS_imp import condition_did_all_elem, \
+    get_user_time_now, number_to_emoji, \
+    get_data_process_dp, save_data_process_dp, \
+    get_button, row_buttons, get_pages_with_this_elem
+
+
+def get_progress_dp(user_id, huge_list):
+    updated_data_8 = \
+        get_data_process_dp(user_id, 'updated_data_8')
+
+    if not updated_data_8 or updated_data_8[0] != huge_list:
+
+        numbers_progress = math.floor(condition_did_all_elem(huge_list, return_numbers=True) / len(huge_list) * 6)
+        str_progress = numbers_progress * '█' + '▒' * (6 - numbers_progress)
+        save_data_process_dp(user_id, updated_data_8=(huge_list, str_progress))
+        return str_progress
+    else:
+        return updated_data_8[1]
+
+
+def text_for_usual_dp(huge_list, first_description: str):
+    # формируем отдельные элементы расписания
+    pages_with_texts = {1: first_description}
+    pages_with_indexes = {1: []}
+    only_pages = [1]
+
+    # создаём строки ДП
+    n_page = 1
+    for one_ind, one_elm in enumerate(huge_list):
+
+        name_elm, description_elm = list(one_elm[0].items())[0]
+
+        # создаём булевые повторяющиеся условия
+        maybe_even_page = (one_ind + 1) % 5 == 0
+        maybe_last = one_ind != len(huge_list) - 1
+        maybe_nearly_last = maybe_even_page and one_ind + 1 == len(huge_list) - 1
+
+        message_a = f'{number_to_emoji(one_ind + 1)}\n🔺' \
+                    + f'*{name_elm}*' \
+                    + f'\n{huge_list[one_ind][1]}{description_elm}'
+
+        message_a += '\n〰️〰️〰️〰️〰️〰️〰️〰️〰️〰️〰️〰️〰️\n' \
+            if maybe_last and not maybe_even_page or maybe_nearly_last \
+            else '\n'
+
+        # расширяем строку данной страницы
+        pages_with_texts[n_page] += message_a
+        # добавляем индекс элемента к данной странице
+        pages_with_indexes[n_page].append(one_ind)
+
+        # разбиваем по страницам
+        if maybe_even_page and maybe_last and not maybe_nearly_last:
+            n_page += 1
+
+            pages_with_texts[n_page] = ''
+            pages_with_indexes[n_page] = []
+            only_pages.append(n_page)
+
+    return pages_with_texts, only_pages, pages_with_indexes
+
+
+def pages_kb_for_usual_dp(pages_with_texts, only_pages,
+                          message_pages, add_callback,
+                          view_number=None, reversed_kb=None):
+    # если обычные цифры
+    if not view_number:
+        def view_number(x): return x
+
+    if reversed_kb:
+        # reverse ключей при сохранении значений на местах
+        pages_with_texts = dict(zip(reversed(pages_with_texts.keys()), pages_with_texts.values()))
+
+    # находим текст страницы и составляем КБ
+    if out_come_text_mes := pages_with_texts.get(message_pages):
+        # меньше 6 страниц
+        if len(only_pages) < 6:
+
+            butt_list = [get_button(f'· {view_number(n_page)} ·',
+                                    callback_data=f"{n_page}_{add_callback}") if n_page is message_pages
+                         else get_button(f'{view_number(n_page)}',
+                                         callback_data=f"{n_page}_{add_callback}")
+                         for n_page in only_pages]
+
+        else:
+
+            # всего больше 6 страниц, но нажата page <= 3
+            butt_list = []
+            if message_pages <= 3:
+                for n_page in only_pages:
+
+                    if n_page == message_pages:
+                        butt_list.append(
+                            get_button(f'· {view_number(n_page)} ·',
+                                       callback_data=f"{n_page}_{add_callback}"))
+                    elif n_page == 4:
+                        butt_list.append(
+                            get_button(f'{view_number(n_page)} ›',
+                                       callback_data=f"{n_page}_{add_callback}"))
+                    elif n_page == 5:
+                        butt_list.append(get_button(f'{view_number(only_pages[-1])} »',
+                                                    callback_data=f'{only_pages[-1]}_{add_callback}'))
+                    else:
+                        butt_list.append(
+                            get_button(f'{view_number(n_page)}',
+                                       callback_data=f"{n_page}_{add_callback}"))
+            else:
+
+                # всего больше 6 страниц, а нажата page > 3
+                butt_list.append(get_button(f'« {view_number(only_pages[0])}',
+                                            callback_data=f"{only_pages[0]}_{add_callback}"))
+                butt_list.append(get_button(f'‹ {view_number(message_pages - 1)}',
+                                            callback_data=f"{message_pages - 1}_{add_callback}"))
+                butt_list.append(get_button(f'· {view_number(message_pages)} ·',
+                                            callback_data=f"{message_pages}_{add_callback}"))
+                if str(message_pages + 1) in only_pages:
+                    mes_this = view_number(message_pages + 1) if str(message_pages + 3) not in only_pages \
+                        else view_number(message_pages + 1) + ' ›'
+                    butt_list.append(get_button(mes_this,
+                                                callback_data=f'{message_pages + 1}_{add_callback}'))
+                if str(message_pages + 2) in only_pages:
+                    mes_this = view_number(only_pages[-1]) if str(message_pages + 3) not in only_pages \
+                        else view_number(only_pages[-1]) + ' »'
+                    butt_list.append(get_button(mes_this,
+                                                callback_data=f'{only_pages[-1]}_{add_callback}'))
+
+        if reversed_kb:
+            # просто переворачиваем будущую КБ
+            butt_list = reversed(butt_list)
+
+        return out_come_text_mes, row_buttons(*butt_list)
+
+
+def values_for_usual_dp(user_id,
+                        huge_list, add_callback,
+                        text_mes='',
+                        message_pages=1,
+                        dif_create_pages=text_for_usual_dp,
+                        dif_create_kb=pages_kb_for_usual_dp) -> (str, dict):
+    updated_data_2 = \
+        get_data_process_dp(user_id, "updated_data_2")
+
+    # если message_pages - элемент, первая страница появления которого должна быть message_pages
+    if type(message_pages) in (str, tuple, list):
+        message_pages = get_pages_with_this_elem(user_id, message_pages, huge_list)
+        message_pages = int(message_pages[0])
+
+    # при изменении ДП/изменении способа его сортировки
+    if not updated_data_2 \
+            or updated_data_2[0] != huge_list \
+            or updated_data_2[1] != str(dif_create_pages) \
+            or updated_data_2[2] != str(dif_create_kb) \
+            or updated_data_2[5] != add_callback:
+
+        # формируем страницы расписания
+        pages_with_texts, only_pages, *pages_with_indexes \
+            = dif_create_pages(huge_list, text_mes)
+        if pages_with_indexes:
+            save_data_process_dp(user_id, pages_with_indexes=pages_with_indexes[0])
+
+        # находим сообщение и создаём КБ для данного page
+        out_come_text_mes, kb_dp, *new_message_pages = \
+            dif_create_kb(pages_with_texts, only_pages,
+                          message_pages, add_callback) if dif_create_kb is pages_kb_for_usual_dp \
+                else dif_create_kb(user_id,
+                                   pages_with_texts, only_pages,
+                                   message_pages, add_callback)
+        if new_message_pages:
+            message_pages = new_message_pages
+
+        # обновляем основной список
+        save_data_process_dp(user_id, updated_data_2=[huge_list,
+                                                      str(dif_create_pages), str(dif_create_kb),
+                                                      text_mes, message_pages, add_callback,
+                                                      only_pages, pages_with_texts,
+                                                      out_come_text_mes, kb_dp])
+
+    # если изменилась только страница, но сам ДП никак неизменился
+    # OR изменится только начальный текст
+    elif updated_data_2[4] != message_pages or updated_data_2[3] != text_mes:
+
+        # заменяем начальную строчку
+        if updated_data_2[3] != text_mes:
+            updated_data_2[7][1] = text_mes \
+                                   + updated_data_2[7][1][len(updated_data_2[3]):]
+            updated_data_2[3] = text_mes
+
+        # находим сообщение и создаём КБ для данного page
+        out_come_text_mes, kb_dp, *new_message_pages = \
+            dif_create_kb(updated_data_2[7], updated_data_2[6],
+                          message_pages, add_callback) if dif_create_kb is pages_kb_for_usual_dp \
+                else dif_create_kb(user_id,
+                                   updated_data_2[7], updated_data_2[6],
+                                   message_pages, add_callback)
+        if new_message_pages:
+            message_pages = new_message_pages
+
+        # обновляем основной список
+        updated_data_2[5], updated_data_2[8], updated_data_2[9] = \
+            message_pages, out_come_text_mes, kb_dp
+        save_data_process_dp(user_id, updated_data_2=updated_data_2)
+
+    # если ничего не изменилось
+    else:
+        out_come_text_mes, kb_dp = \
+            updated_data_2[8], updated_data_2[9]
+
+    return out_come_text_mes, kb_dp
+
+
+def full_kb_for_usual_dp(user_id,
+                         huge_list, need_kb):
+    updated_data_3 = \
+        get_data_process_dp(user_id, 'updated_data_3')
+
+    not_full_kb = need_kb.copy()
+    if not updated_data_3 \
+            or updated_data_3[0] != huge_list \
+            or updated_data_3[1] != not_full_kb:
+
+        # проверяем: выполнены ли все элементы
+        if condition_did_all_elem(huge_list):
+            row_buttons(get_button(f'✖️ЗАКРЫТЬ✖️', callback_data='close_DP'),
+                        your_kb=need_kb)
+            the_end_dp = \
+                get_data_process_dp(user_id, 'the_end_dp')
+
+            if not the_end_dp:
+                all_time_DP, DP_clock, delta_utc = \
+                    get_data_process_dp(user_id, 'all_time_DP', 'DP_clock', 'delta_utc')
+
+                user_time_now = get_user_time_now(delta_utc)
+                all_time_DP[2][str(user_time_now)] = DP_clock
+                save_data_process_dp(user_id, the_end_dp='END_DAY_PLAN', all_time_DP=all_time_DP,
+                                     updated_data_3=(huge_list, not_full_kb, need_kb))
+        else:
+            cold_event, clock_event, cold_block, clock_block = \
+                get_data_process_dp(user_id, 'cold_event', 'clock_event', 'cold_block', 'clock_block')
+
+            butt_list = [get_button('⚙️', 'settings_DP')]
+            if cold_event and not clock_event:
+                butt_list.append(get_button('🌕', callback_data='mooning'))
+            elif cold_block and not clock_block:
+                butt_list.append(get_button('☀', callback_data='sunning'))
+            butt_list.append(get_button(f'▷▷▷', callback_data='way_bl'))
+
+            # кнопки из butt_list в один row
+            row_buttons(*butt_list, your_kb=need_kb)
+
+            save_data_process_dp(user_id, updated_data_3=(huge_list, not_full_kb, need_kb))
+
+        return need_kb
+
+    return updated_data_3[2]
