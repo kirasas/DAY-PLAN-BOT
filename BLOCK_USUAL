@@ -1,0 +1,212 @@
+from IMP.CONSTS_imp import special_numbers_circle
+from IMP.BASIS_imp import get_first_elem, condition_existing_live_elem, \
+    condition_did_all_elem, get_data_process_dp, save_data_process_dp, \
+    get_button, row_buttons, get_datetime_from_str
+
+
+def get_indexes_current_part_block(last_emoji, with_index_emoji, huge_list,
+                                   use_this_index_as_first=None, get_full_indexes_parts=None):
+    # если last_emoji is NOT None, ищем индексы по эмоджи,
+    # иначе - находим индексы первого эмоджи
+    indexes_emoji = with_index_emoji.get(last_emoji) if last_emoji \
+        else tuple(with_index_emoji.values())[0]
+
+    if indexes_emoji:
+
+        index_el = use_this_index_as_first if use_this_index_as_first \
+            else get_first_elem(huge_list, indexes_emoji)[0]
+
+        if len(indexes_emoji) == 1:
+            return indexes_emoji
+
+        else:
+
+            # находим каждые непоследовательные части блока
+            every_part_of_block = [[]]
+            for this_index, one_ind in enumerate(indexes_emoji):
+
+                every_part_of_block[-1].append(one_ind)
+
+                # если разница между двумя идущими подряд идексами > 1, то это другая часть блока
+                if one_ind != indexes_emoji[-1] and indexes_emoji[this_index + 1] - one_ind > 1:
+
+                    # если наш индекс в отработанной части блока
+                    if not get_full_indexes_parts:
+                        if index_el in every_part_of_block[-1]: return every_part_of_block[-1]
+
+                    every_part_of_block.append([])
+
+            # если return ещё не сработал, то наш индекс в последней части блока или его нет
+            if not get_full_indexes_parts:
+                if index_el in every_part_of_block[-1]: return every_part_of_block[-1]
+            else:
+                return every_part_of_block
+
+
+def run_time_block(user_id):
+    our_part_of_block, cl_ev_for_block = \
+        get_data_process_dp(user_id, 'our_part_of_block', 'cl_ev_for_block')
+
+    if cl_ev_for_block and our_part_of_block:
+        if indexes_emoji := our_part_of_block:
+            # сначала находим значение у дикта - индексы N-емоджи, где ключ - last_emoji
+            for index in indexes_emoji:
+                # смотрим каждый индекс элементов c данным эмоджи в cl_ev_for_block
+                if timing := cl_ev_for_block.get(index):
+                    # находим значение из cl_ev_for_block, где ключ индекс из indexes
+                    return timing
+
+
+def get_time_all_parts_block(user_id):
+    all_time_DP, plus_time_work_block, last_emoji = \
+        get_data_process_dp(user_id, 'all_time_DP', 'plus_time_work_block', 'last_emoji')
+
+    # так как может быть и == 0
+    if plus_time_work_block is None:
+        # всё время из частей блоков плюсуем
+        plus_time_work_block = 0
+        for one_value_emoji in all_time_DP:
+            if done_events := one_value_emoji.get(last_emoji):
+                start_block = get_datetime_from_str(done_events[-1][0])
+                end_block = get_datetime_from_str(done_events[-1][1])
+                plus_time_work_block += (end_block - start_block).total_seconds()
+        save_data_process_dp(user_id, plus_time_work_block=plus_time_work_block)
+
+    return plus_time_work_block
+
+
+def end_time_block(user_id, list_for_group_emoji):
+    last_emoji, clock_block, with_index_emoji, huge_list = \
+        get_data_process_dp(user_id, 'last_emoji', 'clock_block', 'with_index_emoji', 'huge_list')
+
+    if list_for_group_emoji:
+        for emoji_x, _ in list_for_group_emoji[0].items():
+
+            if emoji_x != last_emoji:
+                # сохраняем именно так, чтобы сохранять один раз - быстрее
+                if clock_block:
+                    last_end, all_time_DP = \
+                        get_data_process_dp(user_id, 'end_last_time_event', 'all_time_DP')
+                    if last_end:
+                        this_block_time = (clock_block, last_end)
+                        all_time_DP[-1][last_emoji].append(this_block_time)
+                        clock_block = None
+                        save_data_process_dp(user_id, progress_block=len(with_index_emoji.get(emoji_x)),
+                                             last_emoji=emoji_x,
+                                             our_part_of_block=get_indexes_current_part_block(emoji_x,
+                                                                                              with_index_emoji,
+                                                                                              huge_list),
+                                             plus_time_work_block=None, all_time_DP=all_time_DP,
+                                             clock_block=clock_block, cold_event=[])
+                else:
+                    save_data_process_dp(user_id, progress_block=len(with_index_emoji.get(emoji_x)), last_emoji=emoji_x,
+                                         our_part_of_block=get_indexes_current_part_block(emoji_x,
+                                                                                          with_index_emoji, huge_list),
+                                         plus_time_work_block=None)
+    return clock_block
+
+
+def get_time_block(user_id,
+                   huge_list):
+    updated_data_4 = \
+        get_data_process_dp(user_id, 'updated_data_4')
+
+    if not updated_data_4 \
+            or updated_data_4[0] != huge_list:
+
+        # проверка на живой элемент + время блока
+        existing_events = condition_existing_live_elem(user_id, huge_list)
+
+        clock_block = \
+            get_data_process_dp(user_id, 'clock_block')
+
+        if not clock_block:
+
+            # если time данного блока уже есть, иначе - None
+            if clock_block := run_time_block(user_id):
+                save_data_process_dp(user_id, clock_block=clock_block)
+
+        # конец времени блока и обновление эмоджи
+        clock_block = end_time_block(user_id, existing_events)
+        huge_list, last_emoji, with_index_emoji, work_with_index_emoji = \
+            get_data_process_dp(user_id, 'huge_list', 'last_emoji', 'with_index_emoji', 'work_with_index_emoji')
+
+        # yet_done - разность всех эвентов данного эмоджи (в том числе выполненных) и живых элементов эмоджи
+        yet_done = len(with_index_emoji.get(last_emoji)) - len(work_with_index_emoji.get(last_emoji))
+
+        save_data_process_dp(user_id, list_for_group_emoji=existing_events, yet_done=yet_done,
+                             for_first_open_block=False, updated_data_4=(huge_list, clock_block))
+        return clock_block
+
+    return updated_data_4[1]
+
+
+def values_for_usual_block(user_id,
+                           str_clock, clock_block):
+    list_for_group_emoji, last_page, clock_event, updated_data_5 = \
+        get_data_process_dp(user_id, 'list_for_group_emoji', 'last_page', 'clock_event', 'updated_data_5')
+
+    # условия изменения строк
+    if not updated_data_5 \
+            or updated_data_5[0] != list_for_group_emoji:
+
+        yet_done, progress_block = \
+            get_data_process_dp(user_id, 'yet_done', 'progress_block')
+
+        # СТРОКИ БЛОКА
+        elements_block = ''
+        for emoji_x, values_this_emoji_list in list_for_group_emoji[0].items():
+
+            # определяем начальное сообщение и отступы
+            elements_block = f"*THE BLOCK*\n\t🕒{str_clock}🕘\n" \
+                             f"❮➖*{yet_done}/{progress_block}*➖❯\n\n"
+
+            # добавляем строки с обычными эвентами
+            for one_ind, one_value in enumerate(values_this_emoji_list):
+                for elm_name, _ in one_value.items():
+                    elements_block += \
+                        f'\t{"".join([special_numbers_circle[int(elm)] for elm in str(one_ind + 1)])} | ' \
+                        f'{elm_name}\n{emoji_x}\n'
+
+    elif updated_data_5[1] != str_clock:
+
+        recast_time = \
+            get_data_process_dp(user_id, 'recast_time_block')
+
+        elements_block = updated_data_5[4].replace(recast_time, str_clock, 1)
+
+    else:
+        elements_block = updated_data_5[4]
+
+    # условия изменения КБ
+    if not updated_data_5 \
+            or updated_data_5[0] != list_for_group_emoji \
+            or updated_data_5[2] != last_page \
+            or updated_data_5[3] != clock_event:
+
+        cold_event, huge_list = \
+            get_data_process_dp(user_id, 'cold_event', 'huge_list')
+
+        # КБ БЛОКА
+        # разбираемся с callbacks кнопок
+        last_page = last_page if last_page \
+            else 1
+        callback_for_event = 'in_doing_event' if clock_event \
+            else 'seeing_one_element'
+
+        # разбираемся с кнопкой заморозки
+        need_kb = None
+        if not clock_block and not cold_event \
+                and condition_did_all_elem(huge_list, return_numbers=True) != len(huge_list) - 1:
+            need_kb = row_buttons(get_button('❄️', callback_data='block_snow'))
+        need_kb = row_buttons(
+            get_button('◁', callback_data=f'{last_page}_xDP'),
+            get_button('▷', callback_data=f'{callback_for_event}'), your_kb=need_kb)
+    else:
+        need_kb = updated_data_5[5]
+
+    save_data_process_dp(user_id, updated_data_5=[list_for_group_emoji, str_clock,
+                                                  last_page, clock_event,
+                                                  elements_block, need_kb])
+
+    return elements_block, need_kb
