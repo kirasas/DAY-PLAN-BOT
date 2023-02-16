@@ -1,0 +1,89 @@
+from IMP.CONSTS_imp import dict_with_circle, dict_with_bold_nums
+from IMP.BASIS_imp import big_replacing, condition_existing_live_elem, \
+    get_data_process_dp, save_data_process_dp, \
+    get_button, add_buttons
+
+
+def values_for_usual_work_event(user_id,
+                                huge_list, str_clock, now_time_delta):
+    updated_data_6, for_work_event = \
+        get_data_process_dp(user_id, 'updated_data_6', 'for_work_event')
+    index_el, really_text_mes, time_work = for_work_event
+
+    if not updated_data_6 \
+            or updated_data_6[0] != huge_list \
+            or updated_data_6[1] != str_clock:
+
+        last_text_event = \
+            get_data_process_dp(user_id, 'last_text_event')
+
+        # обновляем время
+        message_a = last_text_event.replace('𝟬𝟬𝟬', str_clock)
+
+        # если имеется время выполнения у данного эвента
+        finish_event_but = time_work - int(now_time_delta)
+        call_finish = 'NONE'
+        if not time_work or finish_event_but <= 0:
+            finish_event_but = '✔️️END✔'
+            call_finish = 'event_ready'
+
+            if time_work:
+                huge_list[index_el][2] = for_work_event[2] = 0
+                save_data_process_dp(user_id, for_work_event=for_work_event,
+                                     huge_list=huge_list)
+
+        event_kb = \
+            add_buttons(get_button('◁◁◁', callback_data='way_bl'),
+                        get_button(f'{finish_event_but}', callback_data=call_finish),
+                        row_width=1)
+
+        save_data_process_dp(user_id, updated_data_6=[huge_list, str_clock, message_a, event_kb])
+        return message_a, event_kb
+    else:
+        return updated_data_6[2], updated_data_6[3]
+
+
+def values_for_usual_seeing_event(user_id,
+                                  huge_list):
+    updated_data_7 = \
+        get_data_process_dp(user_id, 'updated_data_7')
+
+    if not updated_data_7 or updated_data_7[0] != huge_list:
+
+        # проверяем: не все ли элементы в луне
+        existing_events = condition_existing_live_elem(user_id, huge_list, here_is_event=True)
+        real_number_stars, our_part_of_block, work_with_index_emoji, last_emoji = \
+            get_data_process_dp(user_id, 'real_number_stars', 'our_part_of_block',
+                                'work_with_index_emoji', 'last_emoji')
+        yet_not_done = len(work_with_index_emoji.get(last_emoji))
+
+        # кол-во звёзд определяет дизайн
+        real_number_stars += 1
+        if real_number_stars <= 20:
+            real_number_stars = f' ◄▬{dict_with_circle.get(str(real_number_stars))}▬►'
+        else:
+            real_number_stars = f'❁▭*{big_replacing(real_number_stars, dict_with_bold_nums)}*▭❁' \
+                if real_number_stars % 10 == 0 \
+                else f'●▬{big_replacing(real_number_stars, dict_with_circle)}▬●'
+
+        last_text_event = f'*⬈EVENT⬊*\n🕒 𝟬𝟬𝟬 🕘\n{real_number_stars}\n\n﹄___{existing_events[1]}___﹃'
+
+        # KB&BUT
+        def way_bl_but(one_text):
+            return get_button(f'{one_text}',
+                              callback_data='way_bl')
+
+        begin_doing_but = get_button('✖️START✖️', callback_data='in_doing_event')
+        # если осталось выполнить лишь 1 ИЛИ в части блока только 1,
+        # то не добавляем возможность пропустить эвент
+        event_kb = add_buttons(way_bl_but('◁◁◁'), begin_doing_but, row_width=1) \
+            if yet_not_done == 1 or len(our_part_of_block) == 1 \
+            else add_buttons(way_bl_but('◁'),
+                             get_button('🌑', callback_data='eclipse_el'), begin_doing_but, row_width=2)
+
+        save_data_process_dp(user_id, for_work_event=existing_events,
+                             last_text_event=last_text_event,
+                             updated_data_7=(huge_list, last_text_event, event_kb))
+        return last_text_event, event_kb
+    else:
+        return updated_data_7[1], updated_data_7[2]
