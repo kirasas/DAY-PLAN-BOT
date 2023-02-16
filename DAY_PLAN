@@ -1,0 +1,961 @@
+from aiogram import Bot, types
+from aiogram.utils.exceptions import MessageNotModified
+from aiogram.utils.exceptions import InvalidQueryID
+from aiogram.dispatcher import Dispatcher
+from aiogram.utils import executor
+from aiogram.types import CallbackQuery
+from aiogram.types import ParseMode
+from aiogram.dispatcher.filters import Text
+from aiogram.contrib.fsm_storage.memory import MemoryStorage
+from aiogram.dispatcher import FSMContext
+from aiogram.dispatcher.filters.state import State, StatesGroup
+from aiogram.utils.emoji import emojize
+import emoji
+import asyncio
+import sqlite3
+from IMP.APIES_imp import API_1
+from IMP.CONSTS_imp import dict_with_bold_nums, but_prov, back_mes, \
+    dp_stop_tuple, active_kb, sett_kb, back_to_usual_sett_but, back_to_relocating_but, back_to_condition_but
+from IMP.BASIS_imp import get_data_process_dp, save_data_process_dp, big_replacing, number_to_emoji, \
+    get_live_hours, get_datetime_from_str, get_user_time_now, get_delta_time_to_str, get_first_elem, \
+    get_button, row_buttons, add_buttons, to_big_kb, condition_existing_live_elem, create_dict_with_index_emoji
+from IMP.DP_USUAL_imp import get_progress_dp, values_for_usual_dp, full_kb_for_usual_dp
+from IMP.DP_REMAKING_imp import text_for_remaking_dp, text_pages_only_this_element, \
+    full_kb_for_relocating_elements, up_down_elements, save_dp_remakes, full_kb_for_saving_dp
+from IMP.BLOCK_USUAL_imp import get_time_all_parts_block, \
+    get_time_block, values_for_usual_block, get_indexes_current_part_block
+from IMP.EVENT_USUAL_imp import values_for_usual_seeing_event, values_for_usual_work_event
+from DOP_INFO import abc_list
+
+# бот
+bot = Bot(token=API_1)
+storage = MemoryStorage()
+dp = Dispatcher(bot, storage=storage)
+
+
+# STATES
+class work_dp(StatesGroup):
+    the_work = State()
+
+
+class remaking_dp(StatesGroup):
+    get_remake_el = State()
+
+
+# 0/для запуска: костыль
+@dp.message_handler(text=["3"])
+async def the_bone(message: types.Message, state: FSMContext):
+    first_kb = row_buttons(get_button('3', callback_data='way_to_DP'))
+    await message.answer('1', reply_markup=first_kb)
+
+    # state будет использовать лишь в краткосрочной
+    await state.update_data(login='hello')
+    await state.update_data(huge_list=abc_list)
+    await work_dp.the_work.set()
+
+
+# 0.5/testing
+@dp.message_handler(text=["2"], state='*')
+async def the_test(message: types.Message):
+    one_di = None
+    await message.answer('1', parse_mode=ParseMode.MARKDOWN, reply_markup=one_di)
+
+
+# 1/Запуск ДП, проверка рабочего времени
+@dp.callback_query_handler(text="way_to_DP", state=work_dp.the_work)
+async def starting_work(callback: types.CallbackQuery, state: FSMContext):
+    async with state.proxy() as data:
+        login = data.get('login')
+
+    # BD
+    conn = sqlite3.connect('TWO_DB.db', check_same_thread=False)
+    cursor = conn.cursor()
+
+    # берём отклонение от UTC пользователя, default = 3 (МСК)
+    cursor.execute("SELECT DELTA_UTC FROM All_Users WHERE Login = ?",
+                   (login,))
+    delta_utc = int(cursor.fetchone()[0])
+    user_time_now = get_user_time_now(delta_utc)
+
+    # разбираемся с часами работы DP
+    cursor.execute("SELECT STOP_HOUR FROM All_Users WHERE Login = ?",
+                   (login,))
+    stop_h = cursor.fetchone()
+    cursor.execute("SELECT BEGIN_HOUR FROM All_Users WHERE Login = ?",
+                   (login,))
+    beg_h = cursor.fetchone()
+
+    live_time_list = list(get_live_hours(beg_h[0], stop_h[0])) if stop_h or beg_h \
+        else None
+
+    # проверяем, относится ли данный час к рабочим часам
+    if live_time_list \
+            and int(user_time_now.strftime("%H")) not in live_time_list:
+
+        await bot.send_message(chat_id=callback.from_user.id,
+                               text='😵*Время уже прошло, а вы даже ещё не начанали!*😵',
+                               parse_mode=ParseMode.MARKDOWN)
+    else:
+        async with state.proxy() as data:
+            huge_list = data.get('huge_list')
+
+        # Определяем обращение
+        cursor.execute('SELECT Appeal FROM All_Users WHERE Login=?',
+                       (login,))
+        its_appeal = cursor.fetchone()[0]
+
+        # создаём строку в таблице, где будет кэш
+        cursor.execute(f'INSERT INTO all_cashDP (login, user_id, work_dict) '
+                       f'VALUES (?, ?, ?)',
+                       (login, callback.from_user.id, str(
+                           {'huge_list': huge_list,
+                            'user_appeal': its_appeal,
+                            'all_time_DP': [],
+                            'real_number_stars': 0,
+                            'stb_DP': 0,
+                            'stb_block': 0,
+                            'stb_event': 0,
+                            'delta_utc': delta_utc}),))
+        conn.commit()
+
+        # элементы сообщения
+        act_format = f'{its_appeal}*, пожалуйста,' if its_appeal \
+            else 'Пожалуйста,'
+
+        # устанавливаем обратный отсчёт
+        for num_s in range(3, 0, -1):
+
+            start_mes = f'⭐*{act_format} подожди!\n\n' \
+                        f'🏆 *DAY PLAN* данного дня будет сформирован через _{num_s}..._'
+
+            if num_s == 3:
+                # отправляем сообщение
+                begin_message_dp = await bot.send_message(callback.from_user.id,
+                                                          text=start_mes,
+                                                          parse_mode=ParseMode.MARKDOWN)
+                save_data_process_dp(callback.from_user.id, id_dp=begin_message_dp.message_id)
+
+            else:
+                await bot.edit_message_text(chat_id=callback.from_user.id,
+                                            text=start_mes,
+                                            message_id=get_data_process_dp(callback.from_user.id, 'id_dp'),
+                                            parse_mode=ParseMode.MARKDOWN)
+            await asyncio.sleep(0.8)
+
+        # сам ДП
+        asked, need_kb = values_for_usual_dp(callback.from_user.id,
+                                             get_data_process_dp(callback.from_user.id, 'huge_list'), 'oneDP',
+                                             f"✔️*DAY PLAN*✖\n"
+                                             f"\t\t\t\t\t🕒*0000*🕘\n"
+                                             f" ❱◯▒▒▒▒▒▒◯❰\n\n")
+
+        await bot.edit_message_text(chat_id=callback.from_user.id, text=asked,
+                                    message_id=get_data_process_dp(callback.from_user.id, 'id_dp'),
+                                    parse_mode=ParseMode.MARKDOWN,
+                                    reply_markup=row_buttons(but_prov, your_kb=need_kb))
+
+        # зацикливаем проверку времени каждые 5 минут
+        while True:
+
+            huge_list = get_data_process_dp(callback.from_user.id, 'huge_list')
+
+            # проверяем, относится ли данный час к рабочим часам
+            user_time_now = get_user_time_now(delta_utc)
+            if live_time_list \
+                    and int(user_time_now.strftime("%H")) not in live_time_list:
+
+                all_time_DP, DP_clock, id_dp = \
+                    get_data_process_dp(callback.from_user.id, 'all_time_DP', 'DP_clock', 'id_dp')
+
+                for elm in huge_list:
+                    if elm[1] != '⭐':
+                        elm[1] = '❌'
+                save_data_process_dp(callback.from_user.id, huge_list=huge_list, the_end_dp=1)
+
+                await bot.edit_message_text(chat_id=callback.from_user.id,
+                                            text='*🏁ВАШЕ ВРЕМЯ ВЫШЛО🏁*',
+                                            reply_markup=row_buttons(
+                                                get_button('⭕ВЕРНУТЬСЯ К ПЛАНУ ДНЯ⭕',
+                                                           callback_data='1_xDP')),
+                                            message_id=id_dp,
+                                            parse_mode=ParseMode.MARKDOWN)
+
+                # настоящее время для пользователя
+                dif_time = user_time_now - DP_clock
+                all_time_DP[2][user_time_now] = dif_time.total_seconds()
+                save_data_process_dp(callback.from_user.id, all_time_DP=all_time_DP)
+                break
+
+            await asyncio.sleep(300)
+
+
+# 2/ДП до запуска: листание страниц
+@dp.callback_query_handler(Text(endswith="_oneDP"), state=work_dp.the_work)
+async def first_reading_pages(callback: types.CallbackQuery):
+    huge_list, id_dp = \
+        get_data_process_dp(callback.from_user.id, 'huge_list', 'id_dp')
+
+    # для получения страниц из калбека
+    message_pages = int(callback.data[:-6])
+
+    # создаёт DP: возвращает текст сообщений и КБ
+    asked, need_kb = values_for_usual_dp(callback.from_user.id,
+                                         huge_list, 'oneDP',
+                                         f"️✔️*DAY PLAN*✖\n"
+                                         f"\t\t\t\t\t🕒*0000*🕘\n"
+                                         f" ❱◯▒▒▒▒▒▒◯❰\n\n",
+                                         message_pages)
+
+    try:
+        await bot.edit_message_text(chat_id=callback.from_user.id, text=asked,
+                                    message_id=id_dp, parse_mode=ParseMode.MARKDOWN,
+                                    reply_markup=row_buttons(but_prov, your_kb=need_kb))
+    except MessageNotModified:
+        pass
+
+
+# 3/ДП непосредственно ДП
+@dp.callback_query_handler(text='event_ready', state=work_dp.the_work)
+@dp.callback_query_handler(text='active_DP', state=work_dp.the_work)
+@dp.callback_query_handler(Text(endswith="_xDP"), state=work_dp.the_work)
+async def body_dp(callback: types.CallbackQuery):
+    # получаем данный номер страницы
+    save_data_process_dp(callback.from_user.id, proof=1, for_first_open_DP=True,
+                         last_page=int(callback.data[0]) if callback.data[-4:] == '_xDP'
+                         else 1)
+
+    # при выполнении элемента
+    if callback.data == 'event_ready':
+
+        last_time_ready, delta_utc = \
+            get_data_process_dp(callback.from_user.id, 'last_time_ready', 'delta_utc')
+
+        # делаем защиту от двойного нажатия на кнопку выполнить
+        user_time_now = get_user_time_now(delta_utc)
+        if not last_time_ready or (user_time_now - get_datetime_from_str(last_time_ready)).seconds > 0.5:
+            # get_data_process_dp
+            clock_event, all_time_DP, real_number_stars, huge_list, \
+            last_emoji, for_work_event, work_with_index_emoji = \
+                get_data_process_dp(callback.from_user.id, 'clock_event', 'all_time_DP', 'real_number_stars',
+                                    'huge_list', 'last_emoji', 'for_work_event', 'work_with_index_emoji')
+            index_this_elem = for_work_event[0]
+
+            # обновляем huge_list
+            huge_list[index_this_elem][1] = '⭐'
+
+            # добавляем время выполнения данного элемента в список
+            start_to_end_ev = {clock_event: str(user_time_now)}
+            all_time_DP[-1][last_emoji][-1].append(start_to_end_ev)
+
+            # обновляем живые эвенты у эмоджи
+            work_with_index_emoji[last_emoji].remove(index_this_elem)
+
+            # проверка существования хотя бы одного живого элемента
+            condition_existing_live_elem(callback.from_user.id, huge_list, here_is_event=True)
+
+            # прибавляем звёзды
+            real_number_stars += 1
+
+            save_data_process_dp(callback.from_user.id,
+                                 last_time_ready=str(user_time_now), end_last_time_event=str(user_time_now),
+                                 clock_event=None,
+                                 all_time_DP=all_time_DP, huge_list=huge_list,
+                                 work_with_index_emoji=work_with_index_emoji,
+                                 for_work_event=None, real_number_stars=real_number_stars, stb_event=0)
+
+    # включение плана дня после стопа
+    if callback.data == 'active_DP':
+
+        # get_data_process_dp
+        all_time_DP, clock_event, clock_block, \
+        last_emoji, delta_utc, \
+        stop_time_begin, stb_event, stb_block, stb_DP = \
+            get_data_process_dp(callback.from_user.id, 'all_time_DP', 'clock_event',
+                                'clock_block', 'last_emoji', 'delta_utc', 'stop_time_begin',
+                                'stb_event', 'stb_block', 'stb_DP')
+
+        # прибавляем время стопа к общему времени остановки за всё время
+        user_time_now = get_user_time_now(delta_utc)
+        stop_delta = (user_time_now - get_datetime_from_str(stop_time_begin)).total_seconds()
+
+        # что делаем со временем, когда запускаем ДП
+        stb_DP += stop_delta
+        if clock_event:
+            stb_event += stop_delta
+            stb_block += stop_delta
+            all_time_DP[-1][last_emoji][-1].append('⛔',
+                                                   {stop_time_begin: str(user_time_now)})
+        elif clock_block:
+            stb_block += stop_delta
+            all_time_DP[-1][last_emoji].append(('⛔',
+                                                {stop_time_begin: str(user_time_now)}))
+        else:
+            all_time_DP.append({'⛔': (stop_time_begin, str(user_time_now))})
+        save_data_process_dp(callback.from_user.id,
+                             stb_event=stb_event, stb_block=stb_block, stb_DP=stb_DP,
+                             all_time_DP=all_time_DP)
+
+    while True:
+        proof_num = get_data_process_dp(callback.from_user.id, 'proof')
+
+        if proof_num != 1:
+            break
+        else:
+
+            # get_data_process_dp
+            for_first_open, huge_list, id_dp, delta_utc, \
+            DP_clock, recast_time, last_page, the_end_dp, stb_DP = \
+                get_data_process_dp(callback.from_user.id, 'for_first_open_DP', 'huge_list', 'id_dp', 'delta_utc',
+                                    'DP_clock', 'recast_time_DP', 'last_page', 'the_end_dp', 'stb_DP')
+
+            # разбираемся со временем
+            if not DP_clock:
+                # настоящее время для пользователя
+                DP_clock = str(get_user_time_now(delta_utc))
+                save_data_process_dp(callback.from_user.id, DP_clock=DP_clock)
+
+            # смотрим: нужно ли высчитывать дельту времени
+            str_clock = recast_time if the_end_dp \
+                else get_delta_time_to_str(DP_clock, delta_utc, adding_time=-stb_DP)
+
+            if for_first_open or str_clock != recast_time:
+
+                # создаёт DP: возвращает текст сообщений и КБ
+                asked, need_kb = values_for_usual_dp(callback.from_user.id,
+                                                     huge_list, 'xDP',
+                                                     f"✔️*DAY PLAN*✖️\n"
+                                                     f"\t\t\t\t\t🕒 {str_clock} 🕘\n"
+                                                     f" ❱◯"
+                                                     f"{get_progress_dp(callback.from_user.id, huge_list)}"
+                                                     f"◯❰\n\n",
+                                                     last_page)
+
+                # сортирует КБ по условиям его работы
+                need_kb = full_kb_for_usual_dp(callback.from_user.id,
+                                               huge_list, need_kb)
+
+                # условие нахождения на данной странице
+                try:
+                    if get_data_process_dp(callback.from_user.id, 'proof') == 1:
+                        await bot.edit_message_text(
+                            text=asked, chat_id=callback.from_user.id, message_id=id_dp,
+                            parse_mode=ParseMode.MARKDOWN, reply_markup=need_kb)
+
+                    if callback.data == 'event_ready':
+                        numbers_stars = \
+                            big_replacing(get_data_process_dp(callback.from_user.id, "real_number_stars"),
+                                          dict_with_bold_nums)
+                        await bot.answer_callback_query(callback.id,
+                                                        f'⭐{numbers_stars}⭐')
+                except MessageNotModified or InvalidQueryID:
+                    pass
+
+                save_data_process_dp(callback.from_user.id,
+                                     recast_time_DP=str_clock, for_first_open_DP=False)
+
+            # проверяем на предмет остановки цикла, в случае переключения страницы
+            proof_num, the_end_dp = get_data_process_dp(callback.from_user.id, 'proof', 'the_end_dp')
+
+            if proof_num == 1 and not the_end_dp:
+                await asyncio.sleep(60)
+            else:
+                break
+
+
+# 4/блок
+@dp.callback_query_handler(text="way_bl", state=work_dp.the_work)
+@dp.callback_query_handler(text="block_snow", state=work_dp.the_work)
+@dp.callback_query_handler(Text(endswith="_SUNbl"), state=work_dp.the_work)
+async def body_block(callback: types.CallbackQuery):
+    save_data_process_dp(callback.from_user.id, proof=2, for_first_open_block=True)
+
+    # заморозка блока
+    if callback.data == 'block_snow':
+        await bot.answer_callback_query(callback.id, "❄️")
+
+        # get_data_process_dp
+        last_emoji, with_index_emoji, huge_list, cold_block = \
+            get_data_process_dp(callback.from_user.id, 'last_emoji', 'with_index_emoji',
+                                'huge_list', 'cold_block')
+
+        # находим индексы блока
+        indexes_freeze_emoji = with_index_emoji.get(last_emoji)
+
+        # замораживаем эвенты
+        for one_ind in indexes_freeze_emoji:
+            huge_list[one_ind][1] = '❄️'
+
+        # добавляем в лист-заморозки
+        if cold_block:
+            cold_block[last_emoji] = indexes_freeze_emoji
+        else:
+            cold_block = {last_emoji: indexes_freeze_emoji}
+        save_data_process_dp(callback.from_user.id, huge_list=huge_list, cold_block=cold_block)
+
+    # разморозка блоков
+    if '_SUNbl' in callback.data:
+        await bot.answer_callback_query(callback.id, "☀️")
+
+        # get_data_process_dp
+        huge_list, cold_block = \
+            get_data_process_dp(callback.from_user.id, 'huge_list', 'cold_block')
+
+        # получаем индексы элементов данного эмоджи, удаляя эмоджи из cold_block
+        sun_emoji = callback.data[0]
+        for index_DP in cold_block.pop(sun_emoji):
+            huge_list[index_DP][1] = sun_emoji
+
+        save_data_process_dp(callback.from_user.id, huge_list=huge_list, cold_block=cold_block)
+
+    while True:
+        proof_num = get_data_process_dp(callback.from_user.id, 'proof')
+
+        if proof_num != 2:
+            break
+        else:
+
+            # get_data_process_dp
+            for_first_open, huge_list, id_dp, clock_block, delta_utc, recast_time, stb_block = \
+                get_data_process_dp(callback.from_user.id, 'for_first_open_block', 'huge_list', 'id_dp',
+                                    'clock_block', 'delta_utc', 'recast_time_block', 'stb_block')
+
+            # выполняем тело блока для первого открытия
+            clock_block = get_time_block(callback.from_user.id, huge_list) if for_first_open \
+                else clock_block
+
+            # время работы
+            str_clock = get_delta_time_to_str(clock_block, delta_utc,
+                                              adding_time=get_time_all_parts_block(callback.from_user.id) - stb_block)
+
+            if for_first_open or recast_time != str_clock:
+
+                elements_block, need_kb = values_for_usual_block(callback.from_user.id,
+                                                                 str_clock, clock_block)
+
+                # шаблон сообщения
+                if get_data_process_dp(callback.from_user.id, 'proof') == 2:
+                    try:
+                        await bot.edit_message_text(
+                            text=elements_block, chat_id=callback.from_user.id, message_id=id_dp,
+                            parse_mode=ParseMode.MARKDOWN, reply_markup=need_kb)
+
+                    except MessageNotModified:
+                        pass
+                save_data_process_dp(callback.from_user.id, recast_time_block=str_clock)
+
+            # останавливаем цикл, если переключена страница
+            proof_num = get_data_process_dp(callback.from_user.id, 'proof')
+
+            if proof_num == 2:
+                await asyncio.sleep(60)
+            else:
+                break
+
+
+# 5/освещение блока - убрать заморозку
+@dp.callback_query_handler(text="sunning", state=work_dp.the_work)
+async def sun_to_block(callback: types.CallbackQuery):
+    save_data_process_dp(callback.from_user.id, proof=4)
+
+    # get_data_process_dp
+    user_appeal, id_dp, cold_block, last_page = \
+        get_data_process_dp(callback.from_user.id, 'user_appeal', 'id_dp',
+                            'cold_block', 'last_page')
+
+    # создаём КБ
+    sun_kb = row_buttons(get_button(back_mes,
+                                    callback_data=f'{last_page}_xDP'))
+
+    # создаём лист со всеми замороженными блоками-эмоджи
+    butt_list = [get_button(f'{one_emoji}',
+                            callback_data=f'{one_emoji}_SUNbl')
+                 for one_emoji in tuple(cold_block)]
+
+    # создём клавиатуру с помощью to_big_kb и отправляем
+    try:
+        await bot.edit_message_text(f'⭐*{user_appeal}*, что ты хочешь разморозить?', chat_id=callback.from_user.id,
+                                    message_id=id_dp,
+                                    reply_markup=to_big_kb(butt_list, sun_kb), parse_mode=ParseMode.MARKDOWN)
+    except MessageNotModified:
+        pass
+
+
+# 6/работа с конкретным элементом
+@dp.callback_query_handler(text="seeing_one_element", state=work_dp.the_work)
+@dp.callback_query_handler(text="eclipse_el", state=work_dp.the_work)
+@dp.callback_query_handler(Text(endswith="_disappearMOON"), state=work_dp.the_work)
+async def self_element_see(callback: types.CallbackQuery):
+    save_data_process_dp(callback.from_user.id, proof=2.5)
+
+    # get_data_process_dp
+    huge_list, id_dp, last_emoji, work_with_index_emoji = \
+        get_data_process_dp(callback.from_user.id, 'huge_list', 'id_dp',
+                            'last_emoji', 'work_with_index_emoji')
+
+    # полнолуние элементов
+    if callback.data == 'eclipse_el':
+        await bot.answer_callback_query(callback.id, "🌑")
+
+        cold_event = get_data_process_dp(callback.from_user.id, 'cold_event')
+        if not cold_event:
+            cold_event = []
+
+        # находим индекс данного элемента и делаем его эмоджи луной
+        now_index_el = get_first_elem(huge_list, work_with_index_emoji.get(last_emoji))[0]
+        cold_event.append(now_index_el)
+        huge_list[now_index_el][1] = '🌑'
+
+        save_data_process_dp(callback.from_user.id, huge_list=huge_list, cold_event=cold_event)
+
+    # снятие луны у элементов
+    if '_disappearMOON' in callback.data:
+        last_emoji, cold_event = \
+            get_data_process_dp(callback.from_user.id, 'last_emoji', 'cold_event')
+
+        #  удаляем элемент из замороженного листа
+        no_moon_event = int(callback.data[0])
+        cold_event.remove(no_moon_event)
+        huge_list[no_moon_event][1] = last_emoji
+        save_data_process_dp(callback.from_user.id, huge_list=huge_list, cold_event=cold_event)
+
+    message_a, event_kb = values_for_usual_seeing_event(callback.from_user.id, huge_list)
+
+    try:
+        await bot.edit_message_text(message_a, chat_id=callback.from_user.id,
+                                    message_id=id_dp, parse_mode=ParseMode.MARKDOWN,
+                                    reply_markup=event_kb)
+    except MessageNotModified:
+        pass
+
+
+# 7/исчезновение луны - убрать луну у элемента
+@dp.callback_query_handler(text="mooning", state=work_dp.the_work)
+async def not_moon_event(callback: types.CallbackQuery):
+    save_data_process_dp(callback.from_user.id, proof=5)
+
+    # get_data_process_dp
+    user_appeal, id_dp, last_page, cold_event = \
+        get_data_process_dp(callback.from_user.id, 'user_appeal', 'id_dp',
+                            'last_page', 'cold_event')
+
+    not_moon_kb = row_buttons(get_button(back_mes,
+                                         callback_data=f'{last_page}_xDP'))
+    # стандартно сортируем лист по возврастанию
+    cold_event.sort()
+
+    # с помощью number_to_emoji переводим число в emoji
+    butt_list = [get_button(f'{number_to_emoji(one_elem + 1)}',
+                            callback_data=f'{one_elem}_disappearMOON')
+                 for one_elem in cold_event]
+
+    await bot.edit_message_text(f'⭐*{user_appeal}*, где должно пройти затмение?', chat_id=callback.from_user.id,
+                                message_id=id_dp,
+                                reply_markup=to_big_kb(butt_list, not_moon_kb), parse_mode=ParseMode.MARKDOWN)
+
+
+# 8/непосредственно выполнение данного элемента
+@dp.callback_query_handler(text="in_doing_event", state=work_dp.the_work)
+async def self_element_do(callback: types.CallbackQuery):
+    save_data_process_dp(callback.from_user.id, proof=3, for_first_open_event=True)
+
+    while True:
+        proof_num = get_data_process_dp(callback.from_user.id, 'proof')
+
+        if proof_num != 3:
+            break
+        else:
+
+            # get_data_process_dp
+            for_first_open, huge_list, id_dp, clock_event, delta_utc, recast_time, stb_event \
+                = get_data_process_dp(callback.from_user.id, 'for_first_open_event', 'huge_list', 'id_dp',
+                                      'clock_event', 'delta_utc', 'recast_time_event', 'stb_event')
+
+            if for_first_open:
+
+                # get_data_process_dp
+                cl_ev_for_block, for_work_event, last_emoji = \
+                    get_data_process_dp(callback.from_user.id, 'cl_ev_for_block', 'for_work_event', 'last_emoji')
+
+                # часы эвента
+                if not clock_event:
+                    all_time_DP, clock_block = \
+                        get_data_process_dp(callback.from_user.id, 'all_time_DP', 'clock_block')
+                    index_el = for_work_event[0]
+
+                    # добавляем в список со временем ярлык, если нет его
+                    if not clock_block or not all_time_DP[-1].get(last_emoji):
+                        all_time_DP.append({last_emoji: []})
+
+                    # добавляем ярлык на эвент
+                    all_time_DP[-1][last_emoji].append([index_el])
+                    # фиксируем время
+                    clock_event = str(get_user_time_now(delta_utc))
+
+                    # для времени блока
+                    if cl_ev_for_block:
+                        cl_ev_for_block[index_el] = clock_event
+                    else:
+                        cl_ev_for_block = {index_el: clock_event}
+
+                    save_data_process_dp(callback.from_user.id, all_time_DP=all_time_DP,
+                                         clock_event=clock_event, cl_ev_for_block=cl_ev_for_block,
+                                         for_first_open_event=False)
+                else:
+                    save_data_process_dp(callback.from_user.id, for_first_open_event=False)
+
+            # время в 000
+            str_clock, needing_clock_diff = get_delta_time_to_str(clock_event, delta_utc,
+                                                                  adding_time=-stb_event, needing_clock_diff=True)
+
+            if for_first_open or recast_time != str_clock:
+
+                message_a, event_kb = values_for_usual_work_event(callback.from_user.id,
+                                                                  huge_list, str_clock, needing_clock_diff)
+                # сама отправка
+                try:
+                    if get_data_process_dp(callback.from_user.id, 'proof') == 3:
+                        await bot.edit_message_text(message_a, chat_id=callback.from_user.id,
+                                                    message_id=id_dp, parse_mode=ParseMode.MARKDOWN,
+                                                    reply_markup=event_kb)
+                except MessageNotModified:
+                    pass
+
+                save_data_process_dp(callback.from_user.id, recast_time_event=str_clock)
+
+            # проверяем на предмет остановки цикла, в случае переключения страницы
+            proof_num = get_data_process_dp(callback.from_user.id, 'proof')
+
+            if proof_num == 3:
+                await asyncio.sleep(60)
+            else:
+                break
+
+
+# 9/остановка ДП
+@dp.callback_query_handler(text="stop_dp", state=work_dp.the_work)
+async def self_stop_dp(callback: types.CallbackQuery):
+    save_data_process_dp(callback.from_user.id, proof=6)
+
+    # сохраняем время стопа
+    delta_utc, huge_list = \
+        get_data_process_dp(callback.from_user.id, 'delta_utc', 'huge_list')
+    save_data_process_dp(callback.from_user.id,
+                         stop_time_begin=str(get_user_time_now(delta_utc)))
+
+    # обновляем время блока
+    get_time_block(callback.from_user.id, huge_list)
+
+    # сообщение стопа из двух частей
+    for index_part, one_part_stop in enumerate(dp_stop_tuple):
+
+        # когда второй индекс, используем active_kb
+        if get_data_process_dp(callback.from_user.id, 'proof') == 6:
+            await bot.edit_message_text(f'⊙{"".join(dp_stop_tuple) if index_part else one_part_stop}',
+                                        chat_id=callback.from_user.id,
+                                        message_id=get_data_process_dp(callback.from_user.id, 'id_dp'),
+                                        reply_markup=
+                                        active_kb if index_part
+                                        else None)
+
+
+# 10/sett_DP
+@dp.callback_query_handler(text="settings_DP",
+                           state=(work_dp.the_work, remaking_dp.get_remake_el))
+@dp.callback_query_handler(text=("save_changes", 'no_save_changes'),
+                           state=remaking_dp.get_remake_el)
+async def self_settings_dp(callback: types.CallbackQuery):
+    save_data_process_dp(callback.from_user.id, proof=7)
+    await work_dp.the_work.set()
+
+    id_dp, last_page = \
+        get_data_process_dp(callback.from_user.id, 'id_dp', 'last_page')
+
+    # разбираемся с разными callbacks
+    if callback.data == 'save_changes':
+
+        save_dp_remakes(callback.from_user.id)
+        await callback.answer(f'DAY PLAN обновлён!')
+
+    elif callback.data == 'no_save_changes':
+        save_data_process_dp(callback.from_user.id, remake_huge_list=None, remake_element=None,
+                             history_remakes=None)
+
+    await bot.edit_message_text(f'⚙️___НАСТРОЙКИ___⚙️', chat_id=callback.from_user.id,
+                                message_id=id_dp,
+                                reply_markup=
+                                row_buttons(get_button(back_mes, callback_data=f'{last_page}_xDP'),
+                                            your_kb=sett_kb.copy()),
+                                parse_mode=ParseMode.MARKDOWN)
+
+
+# 11/sett_DP/element_order
+@dp.callback_query_handler(text="coordinate_elements",
+                           state=work_dp.the_work)
+@dp.callback_query_handler(Text(endswith="_sett_dp_1"),
+                           state=remaking_dp.get_remake_el)
+async def sett_elem_order(callback: types.CallbackQuery):
+    await remaking_dp.get_remake_el.set()
+
+    id_dp, huge_list, remake_huge_list, remake_element, last_page_set_2 = \
+        get_data_process_dp(callback.from_user.id, 'id_dp', 'huge_list', 'remake_huge_list',
+                            'remake_element', 'last_page_set_2')
+
+    # разбираемся со страницами
+    message_pages = int(callback.data[0]) if 'sett_dp_1' in callback.data \
+        else 1
+
+    if not remake_huge_list:
+        remake_huge_list = huge_list
+        save_data_process_dp(callback.from_user.id, last_page_set_1=message_pages, remake_huge_list=remake_huge_list,
+                             history_remakes=[('1_sett_dp_1', remake_huge_list)])
+    else:
+        save_data_process_dp(callback.from_user.id, last_page_set_1=message_pages)
+
+    # создаёт DP: возвращает текст сообщений и КБ
+    asked, need_kb = values_for_usual_dp(callback.from_user.id,
+                                         remake_huge_list, '_sett_dp_1',
+                                         message_pages=message_pages,
+                                         dif_create_pages=text_for_remaking_dp)
+
+    # добавляем кнопки в КБ
+    if remake_huge_list == huge_list:
+        # None обязательно - может быть нуль
+        need_kb = row_buttons(back_to_usual_sett_but, your_kb=need_kb) if remake_element is None \
+            else row_buttons(back_to_usual_sett_but, back_to_relocating_but(last_page_set_2), your_kb=need_kb)
+    else:
+        row_buttons(back_to_condition_but('settings_DP' if huge_list == remake_huge_list else 'condition_closing'),
+                    back_to_relocating_but(last_page_set_2), your_kb=need_kb)
+
+    try:
+        await bot.edit_message_text(f'⚙️<b>Н/</b><i>ПОРЯДОК ПЛАНА</i>⚙️\n\n'
+                                    f'<b>📌Выберите элемент расписания!</b>\n'
+                                    f'{asked}', chat_id=callback.from_user.id,
+                                    message_id=id_dp,
+                                    reply_markup=need_kb,
+                                    parse_mode=ParseMode.HTML)
+    except MessageNotModified:
+        pass
+
+
+# 12/sett_DP/element_order/ask: are you right?
+@dp.callback_query_handler(text="condition_closing", state=remaking_dp.get_remake_el)
+async def sett_elem_ask(callback: types.CallbackQuery):
+    id_dp = \
+        get_data_process_dp(callback.from_user.id, 'id_dp')
+
+    save_kb = add_buttons(get_button('СОХРАНИТЬ', callback_data='save_changes'),
+                          get_button('НЕ СОХРАНЯТЬ', callback_data='no_save_changes'),
+                          get_button('ОБРАТНО К ИЗМЕНЕНИЯМ', callback_data='1_sett_dp_1'),
+                          row_width=2)
+
+    await bot.edit_message_text(f'⚙️*Н/*___ПОРЯДОК ПЛАНА___⚙️\n\n'
+                                f'*❓Сохранить изменения DAY PLAN❓*', chat_id=callback.from_user.id,
+                                message_id=id_dp,
+                                reply_markup=save_kb,
+                                parse_mode=ParseMode.MARKDOWN)
+
+
+# 13/sett_DP/element_order/seeking_remake_el
+@dp.message_handler(Text(endswith="BLX"),
+                    state=remaking_dp.get_remake_el)
+@dp.message_handler(Text(startswith="/EVN"),
+                    state=remaking_dp.get_remake_el)
+@dp.message_handler(Text(startswith="/PART"),
+                    state=remaking_dp.get_remake_el)
+async def seeking_els(message: types.Message):
+    await message.delete()
+
+    id_dp, remake_huge_list = \
+        get_data_process_dp(message.from_user.id, 'id_dp', 'remake_huge_list')
+
+    with_index_emoji = \
+        create_dict_with_index_emoji(remake_huge_list)
+    # часть блока
+    if '/PART' in message.text:
+        number_part_and_emoji = message.text.split('_', 1)
+        emoji_block = emoji.emojize(f':{number_part_and_emoji[1]}:')
+        all_parts_this_block = get_indexes_current_part_block(
+            emoji_block, with_index_emoji,
+            remake_huge_list, get_full_indexes_parts=True)
+        this_something = None
+        if all_parts_this_block:
+            need_index_block = number_part_and_emoji[0][5:]
+            if need_index_block.isdigit() and int(need_index_block) - 1 <= len(all_parts_this_block):
+                indexes_our_part_block = this_something = all_parts_this_block[int(need_index_block) - 1]
+                save_data_process_dp(message.from_user.id,
+                                     relocating_part_block=
+                                     [
+                                         emoji_block, indexes_our_part_block,
+                                         [remake_huge_list[one_ind] for one_ind in indexes_our_part_block],
+                                         int(need_index_block)
+                                     ])
+
+    # блок или эвент
+    else:
+        this_something = emoji.emojize(f':{message.text[1:-3]}:') \
+            if 'BLX' in message.text \
+            else message.text[4:]
+
+    remake_element = message_pages = None
+    # часть блока!
+    if type(this_something) is list:
+        remake_element = message_pages = this_something
+    # нам прислали название эмоджи?
+    elif emoji.is_emoji(this_something) and with_index_emoji.get(this_something):
+        remake_element = message_pages = this_something
+    # есть такой эвент?
+    elif this_something.isdigit() and int(this_something) <= len(remake_huge_list):
+        remake_element = int(this_something) - 1
+        message_pages = str(remake_element)
+
+    # если внесли корректные данные
+    # remake_element может быть = 0
+    if remake_element is not None:
+
+        # наш новый DP на первой странице элемента
+        asked, need_kb = values_for_usual_dp(message.from_user.id,
+                                             remake_huge_list, 'sett_dp_2',
+                                             message_pages=message_pages,
+                                             dif_create_kb=text_pages_only_this_element)
+        save_data_process_dp(message.from_user.id,
+                             remake_element=remake_element,
+                             last_page_set_2=1)
+        try:
+            await bot.edit_message_text(f'⚙️*Н/*___ПОРЯДОК ПЛАНА___⚙️\n\n'
+                                        f'🔺️️*Перемещайте выбранный элемент*🔻\n\n'
+                                        f'{asked}', chat_id=message.from_user.id,
+                                        message_id=id_dp,
+                                        reply_markup=
+                                        full_kb_for_relocating_elements(
+                                            message.from_user.id, need_kb, remake_element),
+                                        parse_mode=ParseMode.MARKDOWN)
+        except MessageNotModified:
+            pass
+
+
+# 14/sett_DP/element_order/seeking_remake_el/to_pages
+@dp.callback_query_handler(text=("up_element", 'down_element'), state=remaking_dp.get_remake_el)
+@dp.callback_query_handler(Text(endswith="sett_dp_2"), state=remaking_dp.get_remake_el)
+async def to_remake_pages(callback: types.CallbackQuery):
+    id_dp, remake_huge_list, remake_element = \
+        get_data_process_dp(callback.from_user.id, 'id_dp', 'remake_huge_list', 'remake_element')
+
+    if 'sett_dp_2' in callback.data:
+
+        # при X|_sett_dp_2, X - элемент расписания,
+        # при X_sett_dp_2, X - страница
+        message_pages = callback.data.split('|')[0] if '|' in callback.data \
+            else int(callback.data[:-10])
+
+        save_data_process_dp(callback.from_user.id,
+                             last_page_set_2=message_pages if type(message_pages) is int
+                             else 1)
+    else:
+        # непосредственно осуществляем передвижение элемента
+        remake_element, remake_huge_list = \
+            up_down_elements(callback.from_user.id,
+                                   remake_element, remake_huge_list, action=callback.data)
+        message_pages = str(remake_element) if type(remake_element) is int \
+            else remake_element
+
+        save_data_process_dp(callback.from_user.id,
+                             last_page_set_2=1,
+                             last_action_remaking=callback.data)
+
+    asked, need_kb = values_for_usual_dp(callback.from_user.id,
+                                         remake_huge_list, 'sett_dp_2',
+                                         message_pages=message_pages,
+                                         dif_create_kb=text_pages_only_this_element)
+
+    try:
+        await bot.edit_message_text(f'⚙️*Н/*___ПОРЯДОК ПЛАНА___⚙️\n\n'
+                                    f'🔺️️*Перемещайте выбранный элемент*🔻\n\n'
+                                    f'{asked}', chat_id=callback.from_user.id,
+                                    message_id=id_dp,
+                                    reply_markup=full_kb_for_relocating_elements(
+                                        callback.from_user.id, need_kb, remake_element),
+                                    parse_mode=ParseMode.MARKDOWN)
+    except MessageNotModified:
+        pass
+
+
+# 15/sett_DP/element_order/seeking_remake_el/to_pages/to_remakes
+@dp.callback_query_handler(text=("back_old_step", 'back_future_step'), state=remaking_dp.get_remake_el)
+@dp.callback_query_handler(text="save_remakes", state=remaking_dp.get_remake_el)
+@dp.callback_query_handler(Text(endswith="_sett_dp_3"), state=remaking_dp.get_remake_el)
+async def to_remakes(callback: types.CallbackQuery):
+    id_dp, remake_huge_list, \
+    history_remakes, message_pages = \
+        get_data_process_dp(callback.from_user.id, 'id_dp', 'remake_huge_list',
+                            'history_remakes', 'last_page_set_3')
+
+    if callback.data == 'back_old_step':
+
+        # находим первый индекс не в будущем - настоящее
+        for one_index, one_elem_history in enumerate(reversed(history_remakes)):
+
+            if one_elem_history[-1] != 'in_future' and one_index != len(history_remakes) - 1:
+                # из индекса перевёрнутого листа в обычный индекс
+                history_remakes[-one_index - 1].append('in_future')
+                new_present_time = history_remakes[-one_index - 2]
+                remake_huge_list = new_present_time[1]
+
+                save_data_process_dp(callback.from_user.id,
+                                     remake_element=new_present_time[0] if new_present_time[0] != '1_sett_dp_1'
+                                     else None,
+                                     remake_huge_list=remake_huge_list, history_remakes=history_remakes)
+                break
+
+        else:
+            await callback.answer('Прошлое исчерпано!')
+
+    elif callback.data == 'back_future_step':
+
+        # находим первый индекс in_future
+        for one_index, one_elem_history in enumerate(history_remakes):
+
+            if one_elem_history[-1] == 'in_future':
+                history_remakes[one_index].remove('in_future')
+                remake_huge_list = one_elem_history[1]
+                save_data_process_dp(callback.from_user.id, remake_element=one_elem_history[0],
+                                     remake_huge_list=remake_huge_list,
+                                     history_remakes=history_remakes)
+                break
+        else:
+            await callback.answer('Будущее не предопределено!')
+
+    elif callback.data == 'save_remakes':
+        save_dp_remakes(callback.from_user.id)
+        await callback.answer(f'DAY PLAN обновлён!')
+
+    # определяемся c необходимым номером страницы
+    if '_sett_dp_3' in callback.data:
+        message_pages = int(callback.data[0])
+        save_data_process_dp(callback.from_user.id, last_page_set_3=message_pages)
+
+    asked, need_kb = values_for_usual_dp(callback.from_user.id,
+                                         remake_huge_list, 'sett_dp_3',
+                                         message_pages=message_pages)
+
+    try:
+        await bot.edit_message_text(f'⚙️*Н/*___ПОРЯДОК ПЛАНА___⚙️\n\n'
+                                    f'✅*SIMPLE DAY PLAN*❌\n\n'
+                                    f'{asked}', chat_id=callback.from_user.id,
+                                    message_id=id_dp,
+                                    reply_markup=full_kb_for_saving_dp(callback.from_user.id, need_kb,
+                                                                       message_pages, callback.data),
+                                    parse_mode=ParseMode.MARKDOWN)
+    except MessageNotModified:
+        pass
+
+
+# -!/всё
+@dp.callback_query_handler(text="close_DP", state='*')
+async def all_work_done(callback: types.CallbackQuery):
+    await bot.edit_message_text(f'ALL!', chat_id=callback.from_user.id,
+                                message_id=get_data_process_dp(callback.from_user.id,
+                                                               'id_dp'), parse_mode=ParseMode.MARKDOWN)
+
+
+if __name__ == '__main__':
+    executor.start_polling(dp)
