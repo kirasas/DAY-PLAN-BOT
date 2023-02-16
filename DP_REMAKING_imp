@@ -1,0 +1,494 @@
+import emoji
+from num2words import num2words
+from collections import OrderedDict
+from aiogram.utils.emoji import emojize
+from IMP.CONSTS_imp import dict_with_small_numbers
+from IMP.BASIS_imp import in_roman_number, create_dict_with_index_emoji, number_to_emoji, \
+    get_data, save_data, get_button, add_buttons, height_change_elements, row_buttons, big_replacing
+from IMP.DP_USUAL_imp import pages_kb_for_usual_dp
+from IMP.BLOCK_USUAL_imp import get_indexes_current_part_block, get_time_block
+
+
+def text_pages_only_this_element(user_id,
+                                 pages_with_texts, numbers_all_page_list,
+                                 message_pages, add_callback):
+
+    # получаем разрешённые страницы
+    allow_pages, updated_data_9 = \
+        get_data(user_id, 'allow_pages', 'updated_data_9')
+
+    # если нужно показать страницы блока
+    if len(allow_pages) > 1:
+
+        # если None или есть изменения
+        if not updated_data_9 \
+                or updated_data_9[0] != numbers_all_page_list \
+                or updated_data_9[1] != pages_with_texts \
+                or updated_data_9[-1] != allow_pages:
+
+            # берём текст только из разрешённых страниц
+            message_pages = 1
+            pages_with_texts_new = [text_page
+                                    for number_page, text_page in pages_with_texts.items()
+                                    if int(number_page) in allow_pages]
+
+            # получаем обновлённый список чисто страниц
+            numbers_all_page_list_new = [one_num
+                                         for one_num in range(1, len(pages_with_texts_new) + 1)]
+
+            # в типовой дикт - {number_page: text_page}
+            pages_with_texts_new = dict(zip(numbers_all_page_list_new, pages_with_texts_new))
+
+            # обычная КБ, но с обновлёнными страницами
+            # если двигаем элемент вниз - переворачиваем КБ
+            last_action_remaking = get_data(user_id, 'last_action_remaking')
+            asked, now_kb = pages_kb_for_usual_dp(pages_with_texts_new,
+                                                  numbers_all_page_list_new,
+                                                  message_pages, add_callback,
+                                                  in_roman_number, reversed_kb=
+                                                  True if last_action_remaking == 'down_element'
+                                                  else False)
+
+            save_data(user_id, updated_data_9=[numbers_all_page_list, pages_with_texts,
+                                               message_pages,
+                                               numbers_all_page_list_new, pages_with_texts_new,
+                                               asked, now_kb,
+                                               allow_pages])
+
+        elif updated_data_9[2] != message_pages:
+
+            # если двигаем элемент вниз - переворачиваем КБ
+            last_action_remaking = get_data(user_id, 'last_action_remaking')
+            asked, now_kb = pages_kb_for_usual_dp(updated_data_9[4],
+                                                  updated_data_9[3],
+                                                  message_pages, add_callback,
+                                                  in_roman_number, reversed_kb=
+                                                  True if last_action_remaking == 'down_element'
+                                                  else False)
+
+            updated_data_9[2], updated_data_9[5], updated_data_9[6] = \
+                message_pages, asked, now_kb
+            save_data(user_id, updated_data_9=updated_data_9)
+
+        else:
+            asked, now_kb = \
+                updated_data_9[5], updated_data_9[6]
+
+        return asked, now_kb, message_pages
+    else:
+        save_data(user_id, updated_data_9=None)
+        # нет страниц у одного эвента: КБ = None
+        return pages_with_texts[allow_pages[0]], None
+
+
+def text_for_remaking_dp(huge_list, first_description):
+    message_a = first_description
+    pages_with_texts = {}
+    only_pages = []
+    n_page = 0
+
+    # уникальные эмоджи с сохранением порядка, при том не в ('⭐', '❄️')
+    full_emoji = OrderedDict.fromkeys((one_elem[1]
+                                       for one_elem in huge_list
+                                       if one_elem[1] not in ('⭐', '❄️')))
+    for one_ind, one_emoji in enumerate(full_emoji):
+
+        # добавляем сам блок
+        only_name_emoji = emoji.demojize(one_emoji)[1:-1]
+        message_a += f'\n〰{one_emoji}│<u><b>/{only_name_emoji}BLX</b></u>〰\n'
+
+        parts_block = get_indexes_current_part_block(
+                    one_emoji, create_dict_with_index_emoji(huge_list),
+                    huge_list, get_full_indexes_parts=True)
+        # если нет частей у блока
+        if len(parts_block) == 1:
+
+            # формируем строки с отдельными эвентами, у которых эмоджи == one_emoji
+            message_a += ''.join([
+                # номер эвента
+                f'{number_to_emoji(this_ind + 1)}│/EVN{this_ind + 1}\n🔻'
+                # название эвента
+                f'<b>{tuple(one_elem[0].keys())[0]}</b>'
+                # описание эвента
+                f'\n{one_emoji}{tuple(one_elem[0].values())[0]}\n\n'
+                for this_ind, one_elem in enumerate(huge_list)
+                if one_elem[1] == one_emoji
+            ])
+        # при наличии у блока частей
+        else:
+            # создаём строки для каждой части блока
+            message_a += \
+                ''.join(
+                    [
+                        # снача даём название части блока
+                        f'❣{num2words(index_part + 1, to="ordinal").upper()} | '
+                        f'<i>/PART{index_part + 1}_{only_name_emoji}</i>\n' +
+                        ''.join(
+                            [
+                                # номер эвента
+                                f'{number_to_emoji(this_ind + 1)}│/EVN{this_ind + 1}\n🔻'
+                                # название эвента
+                                f'<b>{tuple(huge_list[this_ind][0].keys())[0]}</b>'
+                                # описание эвента
+                                f'\n{one_emoji}{tuple(huge_list[this_ind][0].values())[0]}\n\n'
+                                for this_ind in one_part
+                                if huge_list[this_ind][1] == one_emoji
+                            ])
+                        # прокручиваем все части блока
+                        for index_part, one_part in enumerate(parts_block)
+                    ])
+
+        # отсекли вторую \n
+        message_a = message_a[:-1] + '➖➖➖➖➖➖➖➖➖➖➖➖➖\n'
+
+        # условие на добавление страницы
+        if one_ind % 2 != 0:
+            n_page += 1
+
+            pages_with_texts[n_page] = message_a
+            only_pages.append(n_page)
+
+            message_a = ''
+        else:
+            # если это последний эмоджи и при том не второй эмоджи,
+            # при котором заканчивается страница
+            if one_ind == len(full_emoji) - 1:
+                pages_with_texts[n_page] += message_a
+
+    return pages_with_texts, only_pages
+
+
+def full_kb_for_relocating_elements(user_id,
+                                    need_kb, remake_element):
+    updated_data_10 = \
+        get_data(user_id, 'updated_data_10')
+
+    if not updated_data_10 \
+            or updated_data_10[0] != need_kb \
+            or updated_data_10[1] != remake_element:
+
+        last_page_set_1, last_page_set_3 = \
+            get_data(user_id, 'last_page_set_1', 'last_page_set_3')
+        if not last_page_set_3: last_page_set_3 = 1
+
+        # изменяем число выбранного эвента на эмоджи число
+        if type(remake_element) is int:
+            remake_element = number_to_emoji(remake_element + 1)
+        elif type(remake_element) is list:
+            relocating_part_block = \
+                get_data(user_id, 'relocating_part_block')
+            number_part_block = in_roman_number(relocating_part_block[-1]) \
+                if type(relocating_part_block[-1]) is int else relocating_part_block[-1]
+            remake_element = \
+                f'{number_part_block}_{relocating_part_block[0]}_{number_part_block}'
+
+        this_el = get_button(remake_element, callback_data='NONE')
+        up_but = get_button('🔺️', callback_data='up_element')
+        down_but = get_button('🔻', callback_data='down_element')
+        see_all_dp_but = get_button('▶️', callback_data=f'{last_page_set_3}_sett_dp_3')
+        choice_elms_but = get_button('◀️️', callback_data=f'{last_page_set_1}_sett_dp_1')
+
+        need_kb_full = add_buttons(up_but, this_el, down_but,
+                                   choice_elms_but, see_all_dp_but,
+                                   your_kb=need_kb.copy() if need_kb else None)
+
+        save_data(user_id,
+                  updated_data_10=(need_kb, remake_element, need_kb_full))
+
+        return need_kb_full
+    else:
+        return updated_data_10[2]
+
+
+def delete_different_parts_block(begin_index_block, end_index_block,
+                                 huge_list, our_emoji,
+                                 action):
+    # срез, где есть эвенты нашего эмоджи
+    here_is_our_emoji = [huge_list[one_index]
+                         for one_index in range(begin_index_block, end_index_block + 1)]
+
+    # уникальные эмоджи из нашего среза, но без нашего эмоджи
+    full_emoji = list(OrderedDict.fromkeys((one_elem[1]
+                                            for one_elem in here_is_our_emoji
+                                            if one_elem[1] not in ('⭐', '❄️', our_emoji))))
+    # если нужно вниз, то добавляем в конец
+    # иначе - в начало
+    if action == 'down_element':
+        full_emoji.append(our_emoji)
+    else:
+        full_emoji.insert(0, our_emoji)
+
+    # эвенты среза в необходимой последовательности
+    blocks_with_events_in_slice = \
+        [one_elem
+         for one_emoji in full_emoji
+         for one_elem in here_is_our_emoji
+         if one_elem[1] == one_emoji]
+
+    # подставляем под индексы созданную последовательность
+    new_locating_blocks = [blocks_with_events_in_slice.pop(0)
+                           if one_elem[1] not in ('⭐', '❄️')
+                           else one_elem
+                           for one_elem in here_is_our_emoji]
+    huge_list[begin_index_block:end_index_block + 1] = new_locating_blocks
+
+
+def up_down_elements(user_id,
+                           remake_element, remake_huge_list,
+                           action):
+    if action == 'down_element':
+
+        if type(remake_element) is int:
+
+            if remake_element < len(remake_huge_list) - 1:
+                # меняем местами данный элемент и элемент с индексом + 1
+                remake_huge_list[remake_element], remake_huge_list[remake_element + 1] = \
+                    remake_huge_list[remake_element + 1], remake_huge_list[remake_element]
+                remake_element += 1
+
+            else:
+
+                # если это последний индекс
+                remake_huge_list.insert(0, remake_huge_list.pop(-1))
+                remake_element = 0
+
+        elif type(remake_element) is list:
+            relocating_part_block = \
+                get_data(user_id, 'relocating_part_block')
+
+            # получаем индексы нашей части блока
+            our_indexes = relocating_part_block[1]
+            last_index_emoji = our_indexes[-1]
+
+            # меняем части друг с другом
+            if last_index_emoji != len(remake_huge_list) - 1:
+                # идексы n-части следующего эмоджи
+                next_emoji = remake_huge_list[last_index_emoji + 1][1]
+                their_indexes = get_indexes_current_part_block(next_emoji,
+                                                               create_dict_with_index_emoji(remake_huge_list),
+                                                               remake_huge_list,
+                                                               use_this_index_as_first=last_index_emoji + 1)
+                if relocating_part_block[0] == next_emoji:
+                    their_indexes = list(set(their_indexes) ^ set(our_indexes))
+
+                # непосредственно перемещение
+                remake_huge_list = height_change_elements(remake_huge_list,
+                                                          to_up_indexes=their_indexes, to_down_indexes=our_indexes)
+            else:
+                # удаляем эвенты блока из конца и добавляем в начало
+                for one_index in our_indexes:
+                    remake_huge_list.insert(0, remake_huge_list.pop(one_index))
+
+            # обновляем индексы части блока
+            relocating_part_block[1] = remake_element = \
+                sorted([remake_huge_list.index(one_elem) for one_elem in relocating_part_block[2]])
+
+            # обновляем номер части данного блока
+            full_indexes_parts = get_indexes_current_part_block(relocating_part_block[0],
+                                                                create_dict_with_index_emoji(remake_huge_list),
+                                                                remake_huge_list,
+                                                                get_full_indexes_parts=True)
+
+            relocating_part_block[-1] = full_indexes_parts.index(relocating_part_block[1])+1 \
+                if relocating_part_block[1] in full_indexes_parts \
+                else '⌘'
+            save_data(user_id, relocating_part_block=relocating_part_block)
+
+        else:
+            # получаем обновлённый дикт
+            new_with_index_emoji = \
+                create_dict_with_index_emoji(remake_huge_list)
+
+            # получаем индексы блока
+            our_indexes = new_with_index_emoji.get(remake_element)
+
+            # получаем части блока
+            full_indexes_parts = get_indexes_current_part_block(remake_element, new_with_index_emoji,
+                                                                remake_huge_list,
+                                                                get_full_indexes_parts=True)
+
+            # перемещение эвентов данного эмоджи на место другого эмоджи
+            begin_index_emoji, last_index_emoji = our_indexes[0], our_indexes[-1]
+            if len(full_indexes_parts) > 1:
+                delete_different_parts_block(begin_index_emoji, last_index_emoji,
+                                             remake_huge_list, remake_element, action)
+
+            elif last_index_emoji != len(remake_huge_list) - 1:
+                next_emoji = remake_huge_list[last_index_emoji + 1][1]
+
+                # идексы следующего эмоджи
+                their_indexes = get_indexes_current_part_block(next_emoji,
+                                                               new_with_index_emoji,
+                                                               remake_huge_list,
+                                                               use_this_index_as_first=last_index_emoji + 1)
+                # непосредственно перемещение
+                remake_huge_list = height_change_elements(remake_huge_list,
+                                                          to_up_indexes=their_indexes, to_down_indexes=our_indexes)
+            else:
+
+                # удаляем эвенты блока из конца и добавляем в начало
+                for one_index in our_indexes:
+                    remake_huge_list.insert(0, remake_huge_list.pop(one_index))
+
+    else:
+
+        if type(remake_element) is int:
+            if remake_element:
+                # меняем местами данный элемент и элемент с индексом - 1
+                remake_huge_list[remake_element], remake_huge_list[remake_element - 1] = \
+                    remake_huge_list[remake_element - 1], remake_huge_list[remake_element]
+                remake_element -= 1
+
+            else:
+                # если это нулевой индекс
+                remake_huge_list.append(remake_huge_list.pop(0))
+                remake_element = len(remake_huge_list) - 1
+
+        elif type(remake_element) is list:
+            relocating_part_block = \
+                get_data(user_id, 'relocating_part_block')
+
+            # получаем индексы нашей части блока
+            our_indexes = relocating_part_block[1]
+
+            # меняем части друг с другом
+            begin_index_emoji = our_indexes[0]
+
+            if begin_index_emoji:
+
+                # идексы n-части следующего эмоджи
+                next_emoji = remake_huge_list[begin_index_emoji - 1][1]
+                their_indexes = get_indexes_current_part_block(next_emoji,
+                                                               create_dict_with_index_emoji(remake_huge_list),
+                                                               remake_huge_list,
+                                                               use_this_index_as_first=begin_index_emoji - 1)
+                if relocating_part_block[0] == next_emoji:
+                    their_indexes = list(set(their_indexes) ^ set(our_indexes))
+
+                # непосредственно перемещение
+                remake_huge_list = height_change_elements(remake_huge_list,
+                                                          to_up_indexes=our_indexes, to_down_indexes=their_indexes)
+            else:
+                # удаляем эвенты блока из начала и добавляем в конец
+                for _ in our_indexes:
+                    remake_huge_list.append(remake_huge_list.pop(0))
+
+            # обновляем индексы части блока
+            relocating_part_block[1] = remake_element = \
+                sorted([remake_huge_list.index(one_elem) for one_elem in relocating_part_block[2]])
+
+            # обновляем номер части данного блока
+            full_indexes_parts = get_indexes_current_part_block(relocating_part_block[0],
+                                                                create_dict_with_index_emoji(remake_huge_list),
+                                                                remake_huge_list,
+                                                                get_full_indexes_parts=True)
+
+            relocating_part_block[-1] = full_indexes_parts.index(relocating_part_block[1]) + 1 \
+                if relocating_part_block[1] in full_indexes_parts \
+                else '⌘'
+            save_data(user_id, relocating_part_block=relocating_part_block)
+
+        else:
+            # получаем обновлённый дикт
+            new_with_index_emoji = \
+                create_dict_with_index_emoji(remake_huge_list)
+
+            # получаем индексы блока
+            our_indexes = new_with_index_emoji.get(remake_element)
+
+            # получаем части блока
+            full_indexes_parts = get_indexes_current_part_block(remake_element, new_with_index_emoji,
+                                                                remake_huge_list,
+                                                                get_full_indexes_parts=True)
+
+            # перемещение эвентов данного эмоджи на место другого эмоджи
+            begin_index_emoji, last_index_emoji = our_indexes[0], our_indexes[-1]
+            if len(full_indexes_parts) > 1:
+                delete_different_parts_block(begin_index_emoji, last_index_emoji,
+                                             remake_huge_list, remake_element, action)
+
+            elif begin_index_emoji:
+                next_emoji = remake_huge_list[begin_index_emoji - 1][1]
+
+                # идексы следующего эмоджи
+                their_indexes = get_indexes_current_part_block(next_emoji,
+                                                               new_with_index_emoji,
+                                                               remake_huge_list,
+                                                               use_this_index_as_first=begin_index_emoji - 1)
+
+                # перемещаем элементы
+                remake_huge_list = height_change_elements(remake_huge_list,
+                                                          to_up_indexes=our_indexes, to_down_indexes=their_indexes)
+            else:
+                # удаляем эвенты блока из начала и добавляем в конец
+                for _ in our_indexes:
+                    remake_huge_list.append(remake_huge_list.pop(0))
+
+    # записываем изменения
+    history_remakes = \
+        get_data(user_id, 'history_remakes')
+
+    # избавляемся от старого будущего
+    if history_remakes[-1][-1] == 'in_future':
+        history_remakes = [one_elem
+                           for one_elem in history_remakes
+                           if one_elem[-1] != 'in_future']
+    history_remakes.append([remake_element, remake_huge_list])
+
+    save_data(user_id,
+              remake_element=remake_element, remake_huge_list=remake_huge_list,
+              history_remakes=history_remakes)
+    return remake_element, remake_huge_list
+
+
+def save_dp_remakes(user_id):
+    remake_huge_list = \
+        get_data(user_id, 'remake_huge_list')
+
+    save_data(user_id, huge_list=remake_huge_list,
+              with_index_emoji=None, our_part_of_block=None,
+              cl_ev_for_block=None, last_emoji=None,
+              remake_element=None, remake_huge_list=None,
+              history_remakes=[('1_sett_dp_1', remake_huge_list)])
+    get_time_block(user_id,
+                   remake_huge_list)
+
+
+def full_kb_for_saving_dp(user_id, need_kb,
+                          message_pages, action):
+    updated_data_11, history_remakes, last_page_set_2 = \
+        get_data(user_id, 'updated_data_11', 'history_remakes', 'last_page_set_2')
+
+    if not updated_data_11 \
+            or updated_data_11[0] != history_remakes \
+            or updated_data_11[1] != message_pages \
+            or action == 'save_remakes':
+
+        # находим количество элементов в будущем
+        only_future = sum([1 for one_elem_history in history_remakes if one_elem_history[-1] == 'in_future'])
+
+        # находим элементы прошлого, к которым можем вернуться
+        only_old = len(history_remakes) - only_future - 1
+
+        # если историю перемещали или сохраняли
+        callback_to_relocating = f'{last_page_set_2}_sett_dp_2'
+        if action in ('back_old_step', 'back_future_step', 'save_remakes'):
+            remake_element = get_data(user_id, 'remake_element')
+            callback_to_relocating = f'{remake_element}|_sett_dp_2' if remake_element \
+                else '1_sett_dp_1'
+
+        add_buttons(
+            get_button(f'↩⎛{big_replacing(only_old, your_dict=dict_with_small_numbers)}⎠',
+                       callback_data='back_old_step'),
+            get_button('🔹SAFE🔹', callback_data='save_remakes'),
+            get_button(f'⎛{big_replacing(only_future, your_dict=dict_with_small_numbers)}⎠↪️',
+                       callback_data='back_future_step'),
+            get_button('⬅️', callback_data=callback_to_relocating),
+        your_kb=need_kb)
+
+        save_data(user_id, updated_data_11=(history_remakes,
+                                                 message_pages,
+                                                 need_kb))
+        return need_kb
+
+    return updated_data_11[2]
