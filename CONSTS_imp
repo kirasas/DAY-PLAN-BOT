@@ -1,0 +1,48 @@
+# COUNTS
+special_numbers_circle = ('𝟘', '𝟙', '𝟚', '𝟛', '𝟜', '𝟝', '𝟞', '𝟟', '𝟠', '𝟡')
+dict_with_circle = dict(zip((str(num) for num in range(1, 21)),
+                            ('➊', '➋', '➌', '➍', '➎', '➏', '➐', '➑', '➒', '❿',
+                             '⓫', '⓬', '⓭', '⓮', '⓯', '⓰', '⓱', '⓲', '⓳', '⓴')))
+dict_with_bold_nums = dict(zip((str(num) for num in range(10)),
+                               ('𝟬', '𝟭', '𝟮', '𝟯', '𝟰', '𝟱', '𝟲', '𝟳', '𝟴', '𝟵')))
+
+dict_with_small_numbers = \
+    {
+    "0": '₀',
+    "1": '₁',
+    "2": '₂',
+    "3": '₃',
+    "4": '₄',
+    "5": '₅',
+    "6": '₆',
+    "7": '₇',
+    "8": '₈',
+    "9": '₉'
+    }
+
+
+# EMOJI+KB
+no_emoji_list = ('⭐', '❄️', '❌', '🌑')
+but_prov = dict(text='❕ОТКРЫТЬ❕', callback_data="way_bl")
+back_mes = '🔙НАЗАД'
+active_kb = {'inline_keyboard': [[dict(text='️❇️RESTART DAYPLAN RIGHT NOW❇️', callback_data='active_DP')]]}
+sett_kb = {'inline_keyboard': [[dict(text='⛔ПРИОСТАНОВИТЬ DAY PLAN⛔', callback_data='stop_dp')],
+                               [dict(text='📈ДИНАМИКА РАБОТЫ📉', callback_data='dynamic_work'),
+                                dict(text='📁ПОРЯДОК ПЛАНА📂', callback_data='coordinate_elements')]]}
+
+# STOP_DP
+dp_stop_str_1 = '\n╔══╗╔══╗╔═╦╗╔═╗╔╗─╔══╗╔═╦╗\n' \
+                '╚╗╗║║╔╗║╚╗║║║╬║║║─║╔╗║║║║║\n' \
+                '╔╩╝║║╠╣║╔╩╗║║╔╝║╚╗║╠╣║║║║║\n' \
+                '╚══╝╚╝╚╝╚══╝╚╝─╚═╝╚╝╚╝╚╩═╝\n\n'
+dp_stop_str_2 = '  ╔══╗╔══╗╔═╗╔═╗╔═╗╔═╗╔══╗\n' \
+                '  ║══╣╚╗╔╝║║║║╬║║╬║║╦╝╚╗╗║\n' \
+                '  ╠══║─║║─║║║║╔╝║╔╝║╩╗╔╩╝║\n' \
+                '  ╚══╝─╚╝─╚═╝╚╝─╚╝─╚═╝╚══╝'
+dp_stop_tuple = (dp_stop_str_1, dp_stop_str_2)
+
+# FOR RELOCATING ELEMENTS
+back_to_usual_sett_but = dict(text=back_mes, callback_data='settings_DP')
+def back_to_relocating_but(last_page_set_2):
+    return dict(text='➡️', callback_data=f'{last_page_set_2}_sett_dp_2')
+def back_to_condition_but(callback): return dict(text=back_mes, callback_data=callback)
